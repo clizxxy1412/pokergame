@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en-us">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no">
+  <title>Balatro</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#000000">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Balatro">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+
+  <style>
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      overflow: hidden; background: #000;
+      position: fixed; inset: 0;
+      overscroll-behavior: none;
+      touch-action: none;
+      -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #stage { position: fixed; inset: 0; background: #000; }
+
+    /* Game canvas: js/boot.js sets the box via --cx/--cy/--cw/--ch. Everything the LOVE/SDL runtime
+       might inject (padding, margins, borders, transforms) is neutralised so the box we compute is
+       exactly the box the game's touch coordinates are measured against. */
+    #canvas {
+      display: block; position: absolute; outline: none; visibility: hidden;
+      left: var(--cx, 0px) !important; top: var(--cy, 0px) !important;
+      width: var(--cw, 100%) !important; height: var(--ch, 100%) !important;
+      padding: 0 !important; margin: 0 !important; border: 0 !important;
+      box-sizing: content-box !important; transform: none !important; max-width: none !important;
+    }
+
+    /* ---------- Loading screen ---------- */
+    #splash {
+      position: fixed; inset: 0; z-index: 5; overflow: hidden;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: clamp(8px, 4.5vh, 22px);
+      background:
+        repeating-linear-gradient(45deg,  rgba(255,255,255,.028) 0 2px, transparent 2px 26px),
+        repeating-linear-gradient(-45deg, rgba(255,255,255,.028) 0 2px, transparent 2px 26px),
+        radial-gradient(120% 95% at 50% 42%, #14394b 0%, #0b1e2a 52%, #04080c 100%);
+      opacity: 1; transition: opacity .6s ease, visibility 0s linear .6s;
+      font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      color: #e8f2f8;
+    }
+    #splash.done { opacity: 0; visibility: hidden; pointer-events: none; }
+    /* slow drifting colour glows, echoing the icon (blue low-left, red high-right) */
+    #splash::before, #splash::after {
+      content: ""; position: absolute; width: 90vmax; height: 90vmax; border-radius: 50%;
+      filter: blur(60px); opacity: .55; pointer-events: none; will-change: transform;
+    }
+    #splash::before { left: -45vmax; bottom: -55vmax; background: radial-gradient(circle, #1f6fd0 0%, transparent 62%); animation: driftA 14s ease-in-out infinite alternate; }
+    #splash::after  { right: -45vmax; top: -55vmax;  background: radial-gradient(circle, #d4262e 0%, transparent 62%); animation: driftB 17s ease-in-out infinite alternate; }
+    @keyframes driftA { to { transform: translate(8vmax, -6vmax) scale(1.12); } }
+    @keyframes driftB { to { transform: translate(-8vmax, 6vmax) scale(1.12); } }
+
+    #splash .hero {
+      position: relative; z-index: 1;
+      width: min(38vh, 38vw, 190px); aspect-ratio: 1;
+      border-radius: 22%;
+      box-shadow: 0 0 0 2px rgba(255,255,255,.14), 0 14px 40px rgba(0,0,0,.65), 0 0 60px rgba(60,140,230,.35);
+      animation: bob 3.2s ease-in-out infinite;
+      will-change: transform;
+    }
+    #splash .hero img { display: block; width: 100%; height: 100%; border-radius: inherit; -webkit-user-drag: none; }
+    #splash .hero::after {           /* soft sweep of light across the icon */
+      content: ""; position: absolute; inset: 0; border-radius: inherit; overflow: hidden;
+      background: linear-gradient(115deg, transparent 38%, rgba(255,255,255,.28) 50%, transparent 62%);
+      background-size: 260% 100%; background-position: 130% 0;
+      animation: sweep 3.2s ease-in-out infinite;
+    }
+    @keyframes bob   { 0%, 100% { transform: translateY(0) rotate(-2.5deg); } 50% { transform: translateY(-9px) rotate(2.5deg); } }
+    @keyframes sweep { 0%, 35% { background-position: 130% 0; } 75%, 100% { background-position: -30% 0; } }
+
+    #splash .bar {
+      position: relative; z-index: 1;
+      width: min(62vw, 300px); height: 12px; border-radius: 999px;
+      background: rgba(0,0,0,.55); box-shadow: inset 0 0 0 2px rgba(255,255,255,.16), 0 2px 10px rgba(0,0,0,.5);
+      overflow: hidden;
+    }
+    #splash .bar i {
+      position: absolute; left: 0; top: 0; bottom: 0; width: var(--p, 6%);
+      border-radius: inherit; overflow: hidden;
+      background: linear-gradient(90deg, #d4262e, #ff7a2f 55%, #ffc83d);
+      transition: width .5s cubic-bezier(.2,.8,.2,1);
+    }
+    #splash .bar i::after {          /* moving sheen so it always looks alive */
+      content: ""; position: absolute; top: 0; bottom: 0; width: 40%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+      animation: sheen 1.5s linear infinite;
+    }
+    @keyframes sheen { from { transform: translateX(-120%); } to { transform: translateX(380%); } }
+
+    #splash .tip {
+      position: relative; z-index: 1; min-height: 1.4em;
+      font-size: clamp(12px, 3.6vh, 16px); font-weight: 600; letter-spacing: .04em;
+      color: rgba(232,242,248,.82); text-shadow: 0 1px 6px rgba(0,0,0,.7);
+      transition: opacity .3s ease;
+    }
+    #splash .tip.swap { opacity: 0; }
+
+    @media (prefers-reduced-motion: reduce) {
+      #splash::before, #splash::after, #splash .hero, #splash .hero::after, #splash .bar i::after { animation: none; }
+    }
+
+    /* ---------- Portrait hint: the game is designed for landscape ---------- */
+    #rotate {
+      display: none; position: fixed; inset: 0; z-index: 10;
+      background: #0b1f2a; color: #e8f4fb;
+      font: 600 18px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+      align-items: center; justify-content: center; flex-direction: column; gap: 18px;
+      text-align: center; padding: 24px;
+    }
+    #rotate svg { width: 72px; height: 72px; animation: tilt 2.2s ease-in-out infinite; }
+    #rotate small { display: block; margin-top: 6px; font-weight: 500; font-size: 13px; opacity: .7; }
+    @keyframes tilt { 0%, 15% { transform: rotate(0); } 55%, 100% { transform: rotate(-90deg); } }
+    @media (orientation: portrait) and (max-width: 900px) { #rotate { display: flex; } }
+    @media (prefers-reduced-motion: reduce) { #rotate svg { animation: none; } }
+
+    #fatal {
+      position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .88); color: #fff;
+      display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+      font: 16px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; text-align: center; padding: 24px;
+    }
+    #fatal[hidden] { display: none; }
+    #fatal button {
+      font: inherit; font-weight: 700; padding: 12px 28px; border: 0; border-radius: 10px;
+      background: #e9499a; color: #fff;
+    }
+
+    /* ---------- ?debug tools ---------- */
+    #debug {
+      position: fixed; left: 6px; top: 6px; z-index: 30; margin: 0; padding: 6px 8px;
+      font: 11px/1.3 ui-monospace, Menlo, monospace; color: #0f0; background: rgba(0,0,0,.72);
+      pointer-events: none; white-space: pre;
+    }
+    #debug[hidden], #probe[hidden] { display: none; }
+    #probe {
+      position: fixed; z-index: 31; width: 28px; height: 28px; margin: -14px 0 0 -14px;
+      border: 2px solid #0f0; border-radius: 50%; pointer-events: none;
+    }
+    #probe::before, #probe::after { content: ""; position: absolute; background: #0f0; }
+    #probe::before { left: 50%; top: -10px; bottom: -10px; width: 2px; margin-left: -1px; }
+    #probe::after  { top: 50%; left: -10px; right: -10px; height: 2px; margin-top: -1px; }
+  </style>
+</head>
+<body>
+  <div id="stage">
+    <canvas id="canvas" oncontextmenu="event.preventDefault()" tabindex="-1"></canvas>
+  </div>
+
+  <div id="splash" role="status" aria-live="polite">
+    <div class="hero"><img src="icons/icon-512.png" alt="" draggable="false"></div>
+    <div class="bar"><i></i></div>
+    <div class="tip" id="splashTip">Shuffling the deck…</div>
+  </div>
+
+  <div id="rotate" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18.5h2"/>
+    </svg>
+    <div>Rotate your device to landscape
+      <small>If it won't rotate, turn off Portrait Orientation Lock in Control Center</small>
+    </div>
+  </div>
+
+  <pre id="debug" hidden></pre>
+  <div id="probe" hidden></div>
+
+  <div id="fatal" hidden>
+    <p></p>
+    <button type="button" onclick="location.reload()">Reload</button>
+  </div>
+
+  <script src="js/boot.js"></script>
+  <script src="js/loader.js"></script>
+  <script src="app/love.js"></script>
+</body>
+</html>
